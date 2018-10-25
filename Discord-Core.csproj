@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>netcoreapp2.0</TargetFramework>
+    <RootNamespace>Discord</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Discord-Objects\Discord-Objects.csproj" />
+    <ProjectReference Include="..\WebSocketting\WebSocketting.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Folder Include="Http\Guilds\" />
+    <Folder Include="Http\NewFolder\" />
+  </ItemGroup>
+
+</Project>
