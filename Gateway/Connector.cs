@@ -1,5 +1,6 @@
 ﻿using Discord.Descriptors;
 using Discord.Descriptors.Guilds;
+using Discord.Http.Gateway;
 using System;
 using System.Collections.Generic;
 using System.Threading;
@@ -117,7 +118,7 @@ namespace Discord.Gateway
             token.ThrowIfCancellationRequested();
 
             Json.Objects.GetGatewayBotResponseObject response =
-                await Gateway.Rest.GetGatewayAsync(token);
+                (Json.Objects.GetGatewayBotResponseObject)await GatewayRoutes.GetGatewayAsync(Gateway.Rest, token);
 
             return true;
         }
