@@ -130,7 +130,7 @@ namespace Discord.Gateway
             token.ThrowIfCancellationRequested();
 
             GetGatewayBotResponseObject response =
-                (GetGatewayBotResponseObject)await GatewayRoutes.GetGatewayAsync(Gateway.Rest, token);
+                (GetGatewayBotResponseObject)await GatewayRoutes.GetGatewayAsync(Gateway.Rest, Credentials, token);
 
             return response;
         }
