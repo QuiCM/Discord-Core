@@ -3,6 +3,7 @@ using Discord.Descriptors.Guilds;
 using Discord.Http;
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -50,14 +51,41 @@ namespace Discord.Gateway
         /// Constructs a new Gateway instance using the provided <seealso cref="Credentials.Credentials"/>
         /// </summary>
         /// <param name="credentials"></param>
-        public Gateway(Credentials.Credentials credentials, System.Net.IWebProxy proxy = null)
+        public Gateway(Credentials.Credentials credentials, Configuration config)
         {
             Credentials = credentials;
             GatewayTokenSource = new CancellationTokenSource();
 
+            Http.Gateway.GatewayRoutes.Encoding = config.Encoding;
             Rest = new Rest(Credentials, "www", "0.1a");
             Connector = new Connector(this, Credentials);
-            _proxy = proxy;
+            
+            if (config.ProxyConfiguration.UseProxy)
+            {
+                _proxy = new System.Net.WebProxy
+                {
+                    Address = new Uri(config.ProxyConfiguration.Address),
+                    BypassList = config.ProxyConfiguration.BypassAddresses,
+                    BypassProxyOnLocal = config.ProxyConfiguration.BypassLocalAddresses,
+                    Credentials = new System.Net.NetworkCredential
+                    {
+                        Domain = config.ProxyConfiguration.Credentials.Domain,
+                        Password = config.ProxyConfiguration.Credentials.Password,
+                        UserName = config.ProxyConfiguration.Credentials.Username
+                    },
+                    UseDefaultCredentials = config.ProxyConfiguration.Credentials.UseDefault
+                };
+                Rest.HttpHandler.Proxy = _proxy;
+            }
+            
+            if (Http.Gateway.GatewayRoutes.Encoding == WebSocketting.WebSocketMessageEncoding.Json)
+            {
+                Connector.OnTextMessage += Connector_OnTextMessage;
+            }
+            else
+            {
+                Connector.OnBinaryMessage += Connector_OnBinaryMessage;
+            }
         }
 
         /// <summary>
@@ -86,7 +114,6 @@ namespace Discord.Gateway
             {
                 GatewayTokenSource = new CancellationTokenSource();
             }
-
             Task blockable = await Connector.ConnectAsync(token);
 
             return blockable;
@@ -128,6 +155,16 @@ namespace Discord.Gateway
         public virtual void Disconnect()
         {
             Connector.Disconnect();
+        }
+
+        private void Connector_OnBinaryMessage(object sender, byte[] e)
+        {
+            Console.WriteLine($"Received bytes: [ {String.Join(",", e)} ]");
+        }
+
+        private void Connector_OnTextMessage(object sender, string e)
+        {
+            Console.WriteLine($"Received message: [ {e} ]");
         }
 
         #region IDisposable Support
