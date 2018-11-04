@@ -1,8 +1,4 @@
-﻿using System;
-using System.Threading;
-using System.Threading.Tasks;
-
-namespace Discord
+﻿namespace Discord
 {
     /// <summary>
     /// 
@@ -15,19 +11,9 @@ namespace Discord
         /// </summary>
         /// <param name="credentials"><see cref="Credentials.Credentials"/> object containing authorization information for the gateway API</param>
         /// <returns></returns>
-        public static Gateway.Gateway CreateGateway(Credentials.Credentials credentials, System.Net.IWebProxy proxy = null)
+        public static Gateway.Gateway CreateGateway(Credentials.Credentials credentials, Configuration config)
         {
-            return new Gateway.Gateway(credentials, proxy);
-        }
-
-        /// <summary>
-        /// 
-        /// </summary>
-        /// <param name="gateway"></param>
-        /// <returns></returns>
-        public static async Task<Task> Connect(Credentials.Credentials credentials, CancellationToken token, System.Net.IWebProxy proxy = null)
-        {
-            return await new Gateway.Gateway(credentials, proxy).ConnectAsync(token);
+            return new Gateway.Gateway(credentials, config);
         }
     }
 }

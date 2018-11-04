@@ -7,21 +7,22 @@
 
   <ItemGroup>
     <Compile Remove="Discord-Objects-Core\**" />
+    <Compile Remove="Http\Guilds\**" />
+    <Compile Remove="Http\NewFolder\**" />
     <Compile Remove="Websocketting\**" />
     <EmbeddedResource Remove="Discord-Objects-Core\**" />
+    <EmbeddedResource Remove="Http\Guilds\**" />
+    <EmbeddedResource Remove="Http\NewFolder\**" />
     <EmbeddedResource Remove="Websocketting\**" />
     <None Remove="Discord-Objects-Core\**" />
+    <None Remove="Http\Guilds\**" />
+    <None Remove="Http\NewFolder\**" />
     <None Remove="Websocketting\**" />
   </ItemGroup>
 
   <ItemGroup>
     <ProjectReference Include="Discord-Objects-Core\Discord-Objects-Core.csproj" />
     <ProjectReference Include="Websocketting\WebSocketting.csproj" />
-  </ItemGroup>
-
-  <ItemGroup>
-    <Folder Include="Http\Guilds\" />
-    <Folder Include="Http\NewFolder\" />
   </ItemGroup>
 
 </Project>

@@ -36,6 +36,14 @@ namespace Discord.Gateway
 
         public List<GuildDescriptor> Guilds { get; protected set; }
         public List<UserDescriptor> Users { get; protected set; }
+        /// <summary>
+        /// Event invoked when a message is received and <see cref="GatewayRoutes.Encoding"/> is set to <see cref="WebSocketMessageEncoding.Json"/>
+        /// </summary>
+        public event EventHandler<string> OnTextMessage;
+        /// <summary>
+        /// Event invoked when a message is received and <see cref="GatewayRoutes.Encoding"/> is set to <see cref="WebSocketMessageEncoding.Binary"/>
+        /// </summary>
+        public event EventHandler<byte[]> OnBinaryMessage;
 
         /// <summary>
         /// Token provided by an end-user for them to manage cancellation with
@@ -86,6 +94,14 @@ namespace Discord.Gateway
 
             //Use the retrieved information to create a new WebSocket instance, then connect to it
             Socket = new WebSocket(_connectionInfo.url, GatewayRoutes.Encoding, Gateway.Proxy);
+            if (GatewayRoutes.Encoding == WebSocketMessageEncoding.Binary)
+            {
+                Socket.OnBinaryMessage += Socket_OnBinaryMessage;
+            }
+            else
+            {
+                Socket.OnTextMessage += Socket_OnTextMessage;
+            }
             //We send the linked TokenSource token through so that cancellation will propagate to/from the WebSocket.
             //The returned task can be awaited to block
             Task blockable = await Socket.ConnectAsync(linkedTokenSource.Token);
@@ -179,6 +195,18 @@ namespace Discord.Gateway
         {
             token.ThrowIfCancellationRequested();
             await Task.Delay(1000, token);
+        }
+
+
+
+        private void Socket_OnTextMessage(object sender, StringMessageEventArgs e)
+        {
+            OnTextMessage?.Invoke(this, e.Data);
+        }
+
+        private void Socket_OnBinaryMessage(object sender, BinaryMessageEventArgs e)
+        {
+            OnBinaryMessage?.Invoke(this, e.Data);
         }
     }
 }
