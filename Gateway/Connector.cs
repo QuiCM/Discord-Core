@@ -2,6 +2,7 @@
 using Discord.Descriptors.Guilds;
 using Discord.Http.Gateway;
 using Discord.Json.Objects;
+using Discord.Utility;
 using System;
 using System.Collections.Generic;
 using System.Threading;
@@ -26,7 +27,7 @@ namespace Discord.Gateway
         /// <summary>
         /// WebSocket used to connect to the Gateway
         /// </summary>
-        protected WebSocket Socket { get; }
+        internal WebSocket Socket { get; set; }
 
         /// <summary>
         /// TokenSource created by linking the Gateway's CancellationToken and an end-user provided token
@@ -40,6 +41,11 @@ namespace Discord.Gateway
         /// Token provided by an end-user for them to manage cancellation with
         /// </summary>
         private CancellationToken _externalToken;
+        /// <summary>
+        /// Information returned from /api/gateway or /api/gateway/bot endpoints.
+        /// Cast this object based on the value of <see cref="Credentials.Credentials.IsBotToken"/>
+        /// </summary>
+        private GetGatewayResponseObject _connectionInfo;
 
         /// <summary>
         /// Constructs a new gateway connector for the given gateway.
@@ -54,14 +60,15 @@ namespace Discord.Gateway
         }
 
         /// <summary>
-        /// Connects to the Gateway.
-        /// Disconnect with <see cref="Disconnect"/> or by cancelling the provided <see cref="CancellationToken"/>
+        /// Tests authentication then connects to the Gateway API.
+        /// Disconnect with <see cref="Disconnect"/> or by cancelling the provided <see cref="CancellationToken"/>.
+        /// Returns a <see cref="Task"/> which may be awaited to block the calling thread
         /// </summary>
         /// <param name="externalToken">CancellationToken used for managing cancellation of the connection</param>
-        /// <returns></returns>
+        /// <returns>a <see cref="Task"/> which may be awaited to block the calling thread</returns>
         public virtual async Task<Task> ConnectAsync(CancellationToken externalToken)
         {
-            if (externalToken == null) 
+            if (externalToken == null)
             {
                 throw new ArgumentNullException("externalToken");
             }
@@ -75,16 +82,45 @@ namespace Discord.Gateway
             //Retrieve information required to connect to the Gateway.
             //This will throw an exception if it fails.
             //Should we handle the exception and cancel, or let it bubble?
-            GetGatewayBotResponseObject connectionProperties = await AuthenticateAsync(linkedTokenSource.Token);
+            _connectionInfo = await AuthenticateAsync(linkedTokenSource.Token);
 
             //Use the retrieved information to create a new WebSocket instance, then connect to it
-            Socket = new WebSocket(connectionProperties.url, GatewayRoutes.Encoding);
+            Socket = new WebSocket(_connectionInfo.url, GatewayRoutes.Encoding, Gateway.Proxy);
             //We send the linked TokenSource token through so that cancellation will propagate to/from the WebSocket.
             //The returned task can be awaited to block
             Task blockable = await Socket.ConnectAsync(linkedTokenSource.Token);
             //When blockable completes we can assume that we have disconnected from the gateway 
             //and so should cancel the Gateway's token
-            blockable = blockable.ContinueWith(task => Gateway.GatewayTokenSource.Cancel()); 
+            blockable = blockable.ContinueWith(task => Gateway.GatewayTokenSource.Cancel());
+
+            //heartbeat logic
+
+            //Return the blockable task so that clients can block
+            return blockable;
+        }
+
+        /// <summary>
+        /// Connects to the Gateway API using the provided <see cref="GetGatewayResponseObject"/>
+        /// Disconnect with <see cref="Disconnect"/> or by cancelling the provided <see cref="CancellationToken"/>.
+        /// Returns a <see cref="Task"/> which may be awaited to block the calling thread
+        /// </summary>
+        /// <param name="externalToken">CancellationToken used for managing cancellation of the connection</param>
+        /// <returns>a <see cref="Task"/> which may be awaited to block the calling thread</returns>
+        public virtual async Task<Task> ConnectAsync(CancellationToken externalToken, GetGatewayResponseObject connectionInfo)
+        {
+            if (externalToken == null)
+            {
+                throw new ArgumentNullException("externalToken");
+            }
+
+            _externalToken = externalToken;
+            linkedTokenSource = CancellationTokenSource.CreateLinkedTokenSource(externalToken, Gateway.GatewayTokenSource.Token);
+            
+            _connectionInfo = connectionInfo;
+            
+            Socket = new WebSocket(_connectionInfo.url, GatewayRoutes.Encoding, Gateway.Proxy);
+            Task blockable = await Socket.ConnectAsync(linkedTokenSource.Token);
+            blockable = blockable.ContinueWith(task => Gateway.GatewayTokenSource.Cancel());
 
             //heartbeat logic
 
@@ -112,25 +148,24 @@ namespace Discord.Gateway
                 //Cancelling our token should cause the WebSocket and everything else to disconnect
                 Gateway.GatewayTokenSource.Cancel();
             }
-            else 
+            else
             {
                 throw new InvalidOperationException("Disconnection already pending.");
             }
         }
 
         /// <summary>
-        /// Sends the payloads required to authenticate with Discord's Gateway API
+        /// Retrieves connection information for Discord's Gateway API.
         /// </summary>
         /// <param name="token">CancellationToken used to handle cancellation of the connection</param>
-        /// <returns>awaitable boolean. True if auth succeeded, else false</returns>
-        public virtual async Task<GetGatewayBotResponseObject> AuthenticateAsync(CancellationToken token)
+        /// <returns>a <see cref="GetGatewayResponseObject"/> containing information to connect to the Gateway</returns>
+        public virtual async Task<GetGatewayResponseObject> AuthenticateAsync(CancellationToken token)
         {
-            //Doesn't this require authentication?
-
             token.ThrowIfCancellationRequested();
 
-            GetGatewayBotResponseObject response =
-                (GetGatewayBotResponseObject)await GatewayRoutes.GetGatewayAsync(Gateway.Rest, Credentials, token);
+            GetGatewayResponseObject response = Credentials.IsBearerToken
+                ? await GatewayRoutes.GetGatewayAsync(Gateway.Rest, token)
+                : await GatewayRoutes.GetBotGatewayAsync(Gateway.Rest, token);
 
             return response;
         }

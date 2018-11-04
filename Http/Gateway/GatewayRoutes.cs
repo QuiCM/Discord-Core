@@ -27,13 +27,8 @@ namespace Discord.Http.Gateway
         /// <param name="ct">CancellationToken used to cancel the request</param>
         /// <exception cref="HttpRequestException">If the request is unsuccessful</exception>
         /// <returns>Returns a <see cref="Json.Objects.GetGatewayResponseObject"/> containing Gateway connection information</returns>
-        public static async Task<Json.Objects.GetGatewayResponseObject> GetGatewayAsync(Rest rest, Credentials.Credentials credentials, CancellationToken ct)
+        public static async Task<Json.Objects.GetGatewayResponseObject> GetGatewayAsync(Rest rest, CancellationToken ct)
         {
-            if (credentials.IsBotToken)
-            {
-                return GetBotGatewayAsync(rest, credentials, ct);
-            }
-
             string endpoint = $"{Rest.RestBaseUrl}{GatewayEndpoint}?v={ApiVersion}&encoding={Encoding.ToString().ToLowerInvariant()}";
 
             Json.Objects.GetGatewayResponseObject response = await rest.GetAsync<Json.Objects.GetGatewayResponseObject>(
@@ -52,7 +47,7 @@ namespace Discord.Http.Gateway
         /// <param name="ct">CancellationToken used to cancel the request</param>
         /// <exception cref="HttpRequestException">If the request is unsuccessful</exception>
         /// <returns>Returns a <see cref="Json.Objects.GetGatewayBotResponseObject"/> containing Gateway connection information</returns>
-        public static async Task<Json.Objects.GetGatewayBotResponseObject> GetBotGatewayAsync(Rest rest, Credentials.Credentials credentials, CancellationToken ct)
+        public static async Task<Json.Objects.GetGatewayBotResponseObject> GetBotGatewayAsync(Rest rest, CancellationToken ct)
         {
             string endpoint = $"{Rest.RestBaseUrl}{BotGatewayEndpoint}?v={ApiVersion}&encoding={Encoding.ToString().ToLowerInvariant()}";
 

@@ -1,11 +1,11 @@
 ﻿using Discord.Http.Retry;
 using Newtonsoft.Json;
+using System.Collections.Generic;
 using System.Linq;
 using System.Net.Http;
 using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
-using WebSocketting;
 
 namespace Discord.Http
 {
@@ -30,11 +30,18 @@ namespace Discord.Http
 
         private Regex _urlRegex = new Regex(".+\\?\\w+=.+(?>&\\w+=.+)*?");
         private Credentials.Credentials _credentials;
+        private string _userAgent;
+        private string _userAgentVersion;
 
         /// <summary>
         /// HttpClient used to perform HTTP requests
         /// </summary>
         protected HttpClient Http { get; set; }
+
+        /// <summary>
+        /// HttpClientHandler used to configure the HttpClient that will make requests
+        /// </summary>
+        public HttpClientHandler HttpHandler { get; } = new HttpClientHandler();
 
         /// <summary>
         /// Constructs a new Rest instance that will use the given credentials to authenticate calls
@@ -45,9 +52,12 @@ namespace Discord.Http
         public Rest(Credentials.Credentials credentials, string userAgentUrl, string userAgentVersion)
         {
             _credentials = credentials;
-            Http = new HttpClient();
-            Http.DefaultRequestHeaders.Add("User-Agent", $"DiscordBot ({userAgentUrl}, {userAgentVersion})");
-            Http.DefaultRequestHeaders.Add("Authorization", credentials.AuthToken);
+            _userAgent = userAgentUrl;
+            _userAgentVersion = userAgentVersion;
+
+            Http = new HttpClient(HttpHandler);
+            Http.DefaultRequestHeaders.Add("User-Agent", $"DiscordBot ({_userAgent}, {_userAgentVersion})");
+            Http.DefaultRequestHeaders.Add("Authorization", _credentials.AuthToken);
         }
 
         /// <summary>
@@ -61,11 +71,14 @@ namespace Discord.Http
         /// <returns></returns>
         public async Task<T> GetAsync<T>(
             string url,
-            System.Collections.Generic.Dictionary<string, object> queryParams,
+            IEnumerable<KeyValuePair<string, string>> queryParams,
             CancellationToken ct)
         {
-            string queryString = string.Join("&", queryParams.Select(param => $"{param.Key}={param.Value}"));
-            url = _urlRegex.IsMatch(url) ? $"{url}&{queryString}" : $"{url}?{queryString}";
+            if (queryParams != null)
+            {
+                string queryString = string.Join("&", queryParams.Select(param => $"{param.Key}={param.Value}"));
+                url = _urlRegex.IsMatch(url) ? $"{url}&{queryString}" : $"{url}?{queryString}";
+            }
             
             HttpResponseMessage response = await Http.GetAsync(url, ct);
 
@@ -78,6 +91,8 @@ namespace Discord.Http
             response.EnsureSuccessStatusCode();
             
             string json = await response.Content.ReadAsStringAsync();
+            System.Diagnostics.Debug.WriteLine($"HTTP GET '{url}' returned:\n{json}");
+
             return JsonConvert.DeserializeObject<T>(json);
         }
 
@@ -105,6 +120,7 @@ namespace Discord.Http
             response.EnsureSuccessStatusCode();
 
             string json = await response.Content.ReadAsStringAsync();
+            System.Diagnostics.Debug.WriteLine($"HTTP POST '{url}'; content '{content}' returned:\n{json}");
             return JsonConvert.DeserializeObject<T>(json);
         }
     }

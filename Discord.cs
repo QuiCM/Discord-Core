@@ -7,7 +7,7 @@ namespace Discord
     /// <summary>
     /// 
     /// </summary>
-    public class Discord
+    public static class Discord
     {
         /// <summary>
         /// Creates a <see cref="Gateway.Gateway"/> object using the provided <see cref="Credentials.Credentials"/> object.
@@ -15,9 +15,9 @@ namespace Discord
         /// </summary>
         /// <param name="credentials"><see cref="Credentials.Credentials"/> object containing authorization information for the gateway API</param>
         /// <returns></returns>
-        public static Gateway.Gateway CreateGateway(Credentials.Credentials credentials)
+        public static Gateway.Gateway CreateGateway(Credentials.Credentials credentials, System.Net.IWebProxy proxy = null)
         {
-            return new Gateway.Gateway(credentials);
+            return new Gateway.Gateway(credentials, proxy);
         }
 
         /// <summary>
@@ -25,9 +25,9 @@ namespace Discord
         /// </summary>
         /// <param name="gateway"></param>
         /// <returns></returns>
-        public static async Task Connect(Credentials.Credentials credentials, CancellationToken token)
+        public static async Task<Task> Connect(Credentials.Credentials credentials, CancellationToken token, System.Net.IWebProxy proxy = null)
         {
-            await new Gateway.Gateway(credentials).ConnectAsync(token);
+            return await new Gateway.Gateway(credentials, proxy).ConnectAsync(token);
         }
     }
 }
