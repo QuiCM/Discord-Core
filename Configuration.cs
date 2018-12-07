@@ -51,7 +51,7 @@ namespace Discord
         /// <summary>
         /// <see cref="WebProxy.Credentials"/>
         /// </summary>
-        public ProxyCredentials Credentials { get; set; } = new ProxyCredentials();
+        public ProxyCredentials Credentials { get; set; }
     }
 
     /// <summary>
@@ -64,8 +64,9 @@ namespace Discord
 
         public ProxyConfiguration ProxyConfiguration { get; set; } = new ProxyConfiguration();
         public string AuthToken { get; set; }
+        public string UserAgentUrl { get; set; } = "www";
+        public string Version { get; set; } = "0.1a";
         public WebSocketMessageEncoding Encoding { get; set; } = WebSocketMessageEncoding.Json;
-
 
 
         [JsonConstructor]

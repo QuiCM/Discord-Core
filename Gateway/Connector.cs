@@ -1,8 +1,10 @@
 ﻿using Discord.Descriptors;
+using Discord.Descriptors.Commands;
 using Discord.Descriptors.Guilds;
+using Discord.Descriptors.Payloads;
 using Discord.Http.Gateway;
 using Discord.Json.Objects;
-using Discord.Utility;
+using Discord.StatusCodes;
 using System;
 using System.Collections.Generic;
 using System.Threading;
@@ -17,6 +19,20 @@ namespace Discord.Gateway
     public class Connector
     {
         /// <summary>
+        /// Token provided by an end-user for them to manage cancellation with
+        /// </summary>
+        private CancellationToken _externalToken;
+
+        /// <summary>
+        /// Information returned from /api/gateway or /api/gateway/bot endpoints.
+        /// Cast this object based on the value of <see cref="Credentials.Credentials.IsBotToken"/>
+        /// </summary>
+        private GetGatewayResponseObject _connectionInfo;
+
+        private bool _heartbeatAck = false;
+        private int? _sequence = null;
+
+        /// <summary>
         /// Gateway instance hosting this connector
         /// </summary>
         protected Gateway Gateway { get; }
@@ -25,35 +41,32 @@ namespace Discord.Gateway
         /// </summary>
         protected Credentials.Credentials Credentials { get; }
         /// <summary>
+        /// Interval at which heartbeat commands are sent over the Gateway
+        /// </summary>
+        protected int HeartbeatInterval { get; set; }
+        /// <summary>
+        /// <see cref="GatewayEvents"/> instance managing gateway event handlers
+        /// </summary>
+        public GatewayEvents Events { get; set; } = new GatewayEvents();
+
+        /// <summary>
         /// WebSocket used to connect to the Gateway
         /// </summary>
         internal WebSocket Socket { get; set; }
-
         /// <summary>
         /// TokenSource created by linking the Gateway's CancellationToken and an end-user provided token
         /// </summary>
         internal CancellationTokenSource linkedTokenSource;
-
-        public List<GuildDescriptor> Guilds { get; protected set; }
-        public List<UserDescriptor> Users { get; protected set; }
         /// <summary>
-        /// Event invoked when a message is received and <see cref="GatewayRoutes.Encoding"/> is set to <see cref="WebSocketMessageEncoding.Json"/>
+        /// Event invoked when a message is received and <see cref="GatewayRoutes.Encoding"/> is set to <see cref="WebSocketMessageEncoding.Json"/>.
+        /// This event exposes the raw message sent through the websocket
         /// </summary>
-        public event EventHandler<string> OnTextMessage;
+        public event EventHandler<string> OnRawTextMessage;
         /// <summary>
-        /// Event invoked when a message is received and <see cref="GatewayRoutes.Encoding"/> is set to <see cref="WebSocketMessageEncoding.Binary"/>
+        /// Event invoked when a message is received and <see cref="GatewayRoutes.Encoding"/> is set to <see cref="WebSocketMessageEncoding.Binary"/>.
+        /// This event exposes the raw message sent through the websocket
         /// </summary>
-        public event EventHandler<byte[]> OnBinaryMessage;
-
-        /// <summary>
-        /// Token provided by an end-user for them to manage cancellation with
-        /// </summary>
-        private CancellationToken _externalToken;
-        /// <summary>
-        /// Information returned from /api/gateway or /api/gateway/bot endpoints.
-        /// Cast this object based on the value of <see cref="Credentials.Credentials.IsBotToken"/>
-        /// </summary>
-        private GetGatewayResponseObject _connectionInfo;
+        public event EventHandler<byte[]> OnRawBinaryMessage;
 
         /// <summary>
         /// Constructs a new gateway connector for the given gateway.
@@ -69,7 +82,7 @@ namespace Discord.Gateway
 
         /// <summary>
         /// Tests authentication then connects to the Gateway API.
-        /// Disconnect with <see cref="Disconnect"/> or by cancelling the provided <see cref="CancellationToken"/>.
+        /// Disconnect with <see cref="DisconnectAsync"/> or by cancelling the provided <see cref="CancellationToken"/>.
         /// Returns a <see cref="Task"/> which may be awaited to block the calling thread
         /// </summary>
         /// <param name="externalToken">CancellationToken used for managing cancellation of the connection</param>
@@ -92,32 +105,12 @@ namespace Discord.Gateway
             //Should we handle the exception and cancel, or let it bubble?
             _connectionInfo = await AuthenticateAsync(linkedTokenSource.Token);
 
-            //Use the retrieved information to create a new WebSocket instance, then connect to it
-            Socket = new WebSocket(_connectionInfo.url, GatewayRoutes.Encoding, Gateway.Proxy);
-            if (GatewayRoutes.Encoding == WebSocketMessageEncoding.Binary)
-            {
-                Socket.OnBinaryMessage += Socket_OnBinaryMessage;
-            }
-            else
-            {
-                Socket.OnTextMessage += Socket_OnTextMessage;
-            }
-            //We send the linked TokenSource token through so that cancellation will propagate to/from the WebSocket.
-            //The returned task can be awaited to block
-            Task blockable = await Socket.ConnectAsync(linkedTokenSource.Token);
-            //When blockable completes we can assume that we have disconnected from the gateway 
-            //and so should cancel the Gateway's token
-            blockable = blockable.ContinueWith(task => Gateway.GatewayTokenSource.Cancel());
-
-            //heartbeat logic
-
-            //Return the blockable task so that clients can block
-            return blockable;
+            return await InternalConnectAsync();
         }
 
         /// <summary>
         /// Connects to the Gateway API using the provided <see cref="GetGatewayResponseObject"/>
-        /// Disconnect with <see cref="Disconnect"/> or by cancelling the provided <see cref="CancellationToken"/>.
+        /// Disconnect with <see cref="DisconnectAsync"/> or by cancelling the provided <see cref="CancellationToken"/>.
         /// Returns a <see cref="Task"/> which may be awaited to block the calling thread
         /// </summary>
         /// <param name="externalToken">CancellationToken used for managing cancellation of the connection</param>
@@ -131,14 +124,32 @@ namespace Discord.Gateway
 
             _externalToken = externalToken;
             linkedTokenSource = CancellationTokenSource.CreateLinkedTokenSource(externalToken, Gateway.GatewayTokenSource.Token);
-            
-            _connectionInfo = connectionInfo;
-            
-            Socket = new WebSocket(_connectionInfo.url, GatewayRoutes.Encoding, Gateway.Proxy);
-            Task blockable = await Socket.ConnectAsync(linkedTokenSource.Token);
-            blockable = blockable.ContinueWith(task => Gateway.GatewayTokenSource.Cancel());
 
-            //heartbeat logic
+            _connectionInfo = connectionInfo;
+
+            return await InternalConnectAsync();
+        }
+
+        protected virtual async Task<Task> InternalConnectAsync(int? seq = null, string ses = null)
+        {
+            //Use the retrieved information to create a new WebSocket instance, then connect to it
+            Socket = new WebSocket(_connectionInfo.url, GatewayRoutes.Encoding, Gateway.Proxy);
+            if (GatewayRoutes.Encoding == WebSocketMessageEncoding.Binary)
+            {
+                Socket.OnBinaryMessage += Socket_OnBinaryMessage;
+            }
+            else
+            {
+                Socket.OnTextMessage += Socket_OnTextMessage;
+            }
+
+            Events.RegisterInternalHandles(this);
+
+            //GatewayEvents.OnGatewayHello += GatewayEvents_OnGatewayHello;
+            //We send the linked TokenSource token through so that cancellation will propagate to/from the WebSocket.
+            //The returned task can be awaited to block
+            await Socket.ConnectAsync(linkedTokenSource.Token);
+            Task blockable = await Socket.ReadWriteAsync(linkedTokenSource.Token);
 
             //Return the blockable task so that clients can block
             return blockable;
@@ -147,27 +158,25 @@ namespace Discord.Gateway
         /// <summary>
         /// Disconnects the gateway
         /// </summary>
-        public virtual void Disconnect()
+        public virtual async Task<DisconnectStatus> DisconnectAsync()
         {
             if (_externalToken == null)
             {
-                throw new InvalidOperationException("Gateway must be connected in order to disconnect.");
+                //No connection has been made to this gateway
+                return DisconnectStatus.NotConnected;
             }
 
-            if (_externalToken.IsCancellationRequested)
+            if (linkedTokenSource.IsCancellationRequested)
             {
-                throw new InvalidOperationException("Disconnection already pending.");
+                //The user-provided token or our internal token have already been cancelled
+                return DisconnectStatus.AlreadyPending;
             }
 
-            if (!Gateway.GatewayTokenSource.IsCancellationRequested)
-            {
-                //Cancelling our token should cause the WebSocket and everything else to disconnect
-                Gateway.GatewayTokenSource.Cancel();
-            }
-            else
-            {
-                throw new InvalidOperationException("Disconnection already pending.");
-            }
+            //Cancelling our token should cause everything to stop
+            await Socket.DisconnectAsync(System.Net.WebSockets.WebSocketCloseStatus.NormalClosure, "", linkedTokenSource.Token);
+            linkedTokenSource.Cancel();
+
+            return DisconnectStatus.Pending;
         }
 
         /// <summary>
@@ -193,20 +202,83 @@ namespace Discord.Gateway
         /// <returns></returns>
         public virtual async Task HeartbeatAsync(CancellationToken token)
         {
+            Queue(new GatewayEvent<int?>(GatewayOpCode.Heartbeat).WithPayload(_sequence));
+
             token.ThrowIfCancellationRequested();
-            await Task.Delay(1000, token);
+            await Task.Delay(HeartbeatInterval, token);
+
+            if (!_heartbeatAck)
+            {
+                await Socket.DisconnectAsync(System.Net.WebSockets.WebSocketCloseStatus.ProtocolError, "No ACK received", token);
+                linkedTokenSource.Cancel();
+                //need to restart once everything dies - or leave this to end user?
+                return;
+            }
+
+            //Fire and forget - we don't need to await this
+#pragma warning disable CS4014
+            HeartbeatAsync(token);
+#pragma warning restore CS4014
         }
 
+        /// <summary>
+        /// Queues an event for sending over the Websocket
+        /// </summary>
+        /// <param name="message"></param>
+        public virtual void Queue<TPayload>(GatewayEvent<TPayload> gatewayEvent, 
+            Newtonsoft.Json.JsonSerializerSettings settings = null)
+        {
+            string json = gatewayEvent.Serialize(settings);
+            Socket.Send(gatewayEvent.Serialize(settings));
+        }
 
+        internal void GatewayEvents_OnGatewayHello(string rawJson, GatewayEvent<HelloPayload> ev)
+        {
+            HeartbeatInterval = ev.Payload.HeartbeatInterval;
+            //Fire and forget - we don't need to await this
+#pragma warning disable CS4014
+            Queue(new GatewayEvent<IdentifyPayload>(GatewayOpCode.Identify)
+                .WithPayload(new IdentifyPayload
+                {
+                    Token = Credentials.AuthToken,
+                    Compress = false,
+                    LargeThreshold = 250,
+                    Properties = new ConnectionProperties { browser = "DotNET Core2.1", device = "DAsyc", os = "Win10" },
+                    //Presence = new Descriptors.Guilds.Members.StatusDescriptor { status = "dnd" },
+                    //Shards = new[] { 0, 1 }
+                })
+           );
+
+            HeartbeatAsync(linkedTokenSource.Token);
+#pragma warning restore CS4014
+        }
+
+        internal void GatewayEvents_AllEventsCallback(string rawJson, GatewayEvent<object> ev)
+        {
+            Console.WriteLine($"[RECV] [{ev.OpCode}] {(ev.OpCode == GatewayOpCode.Dispatch ? ((DispatchGatewayEvent<object>)ev).Name : "")}");
+        }
+
+        internal void GatewayEvents_OnHeartbeatReq(string json, GatewayEvent<object> ev)
+        {
+            Queue(new GatewayEvent<object>(GatewayOpCode.HeartbeatAck),
+                new Newtonsoft.Json.JsonSerializerSettings { NullValueHandling = Newtonsoft.Json.NullValueHandling.Ignore });
+        }
+
+        internal void GatewayEvents_OnHeartbeatAck(string json, GatewayEvent<object> ev)
+        {
+            _heartbeatAck = true;
+        }
 
         private void Socket_OnTextMessage(object sender, StringMessageEventArgs e)
         {
-            OnTextMessage?.Invoke(this, e.Data);
+            OnRawTextMessage?.Invoke(this, e.Data);
+            Events.Invoke(e.Data);
         }
 
         private void Socket_OnBinaryMessage(object sender, BinaryMessageEventArgs e)
         {
-            OnBinaryMessage?.Invoke(this, e.Data);
+            OnRawBinaryMessage?.Invoke(this, e.Data);
+            //Invoke
         }
     }
 }

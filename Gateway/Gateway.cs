@@ -1,9 +1,5 @@
-﻿using Discord.Descriptors;
-using Discord.Descriptors.Guilds;
-using Discord.Http;
+﻿using Discord.Http;
 using System;
-using System.Collections.Generic;
-using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -31,24 +27,17 @@ namespace Discord.Gateway
         /// REST API helper
         /// </summary>
         public Rest Rest { get; set; }
-        public IEnumerable<GuildDescriptor> Guilds => Connector.Guilds;
-        public IEnumerable<UserDescriptor> Users => Connector.Users;
         /// <summary>
-        /// Proxy used to connect to REST and Gateway APIs
+        /// Proxy used for connections
         /// </summary>
-        public System.Net.IWebProxy Proxy
-        {
-            get { return _proxy; }
-            set
-            {
-                Rest.HttpHandler.Proxy = value;
-                Connector.Socket.ConnectionOptions.Proxy = value;
-                _proxy = value;
-            }
-        }
+        public System.Net.IWebProxy Proxy => _proxy;
+        /// <summary>
+        /// <see cref="GatewayEvents"/> instance managing gateway event handlers
+        /// </summary>
+        public GatewayEvents Events => Connector.Events;
 
         /// <summary>
-        /// Constructs a new Gateway instance using the provided <seealso cref="Credentials.Credentials"/>
+        /// Constructs a new Gateway instance using the provided <see cref="Credentials.Credentials"/>
         /// </summary>
         /// <param name="credentials"></param>
         public Gateway(Credentials.Credentials credentials, Configuration config)
@@ -57,34 +46,18 @@ namespace Discord.Gateway
             GatewayTokenSource = new CancellationTokenSource();
 
             Http.Gateway.GatewayRoutes.Encoding = config.Encoding;
-            Rest = new Rest(Credentials, "www", "0.1a");
+            Rest = new Rest(Credentials, config.UserAgentUrl, config.Version);
             Connector = new Connector(this, Credentials);
-            
-            if (config.ProxyConfiguration.UseProxy)
-            {
-                _proxy = new System.Net.WebProxy
-                {
-                    Address = new Uri(config.ProxyConfiguration.Address),
-                    BypassList = config.ProxyConfiguration.BypassAddresses,
-                    BypassProxyOnLocal = config.ProxyConfiguration.BypassLocalAddresses,
-                    Credentials = new System.Net.NetworkCredential
-                    {
-                        Domain = config.ProxyConfiguration.Credentials.Domain,
-                        Password = config.ProxyConfiguration.Credentials.Password,
-                        UserName = config.ProxyConfiguration.Credentials.Username
-                    },
-                    UseDefaultCredentials = config.ProxyConfiguration.Credentials.UseDefault
-                };
-                Rest.HttpHandler.Proxy = _proxy;
-            }
-            
+
+            InitializeProxy(config);
+
             if (Http.Gateway.GatewayRoutes.Encoding == WebSocketting.WebSocketMessageEncoding.Json)
             {
-                Connector.OnTextMessage += Connector_OnTextMessage;
+                Connector.OnRawTextMessage += Connector_OnTextMessage;
             }
             else
             {
-                Connector.OnBinaryMessage += Connector_OnBinaryMessage;
+                Connector.OnRawBinaryMessage += Connector_OnBinaryMessage;
             }
         }
 
@@ -154,17 +127,53 @@ namespace Discord.Gateway
 
         public virtual void Disconnect()
         {
-            Connector.Disconnect();
+            Connector.DisconnectAsync();
         }
 
         private void Connector_OnBinaryMessage(object sender, byte[] e)
         {
-            Console.WriteLine($"Received bytes: [ {String.Join(",", e)} ]");
         }
 
         private void Connector_OnTextMessage(object sender, string e)
         {
-            Console.WriteLine($"Received message: [ {e} ]");
+        }
+
+        private void InitializeProxy(Configuration config)
+        {
+            if (config.ProxyConfiguration.UseProxy)
+            {
+                if (config.ProxyConfiguration.BypassAddresses != null)
+                {
+                    _proxy = new System.Net.WebProxy(
+                        config.ProxyConfiguration.Address,
+                        config.ProxyConfiguration.BypassLocalAddresses,
+                        config.ProxyConfiguration.BypassAddresses
+                    )
+                    {
+                        UseDefaultCredentials = config.ProxyConfiguration.Credentials?.UseDefault ?? false
+                    };
+                }
+                else
+                {
+                    _proxy = new System.Net.WebProxy(
+                        config.ProxyConfiguration.Address
+                    )
+                    {
+                        UseDefaultCredentials = config.ProxyConfiguration.Credentials?.UseDefault ?? false
+                    };
+                }
+
+                if (config.ProxyConfiguration.Credentials != null)
+                {
+                    _proxy.Credentials = new System.Net.NetworkCredential
+                    {
+                        Domain = config.ProxyConfiguration.Credentials.Domain,
+                        Password = config.ProxyConfiguration.Credentials.Password,
+                        UserName = config.ProxyConfiguration.Credentials.Username
+                    };
+                }
+                Rest.HttpHandler.Proxy = _proxy;
+            }
         }
 
         #region IDisposable Support
