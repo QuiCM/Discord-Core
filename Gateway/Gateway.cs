@@ -125,9 +125,9 @@ namespace Discord.Gateway
             return blockable;
         }
 
-        public virtual void Disconnect()
+        public async Task DisconnectAsync()
         {
-            Connector.DisconnectAsync();
+            await Connector.DisconnectAsync();
         }
 
         private void Connector_OnBinaryMessage(object sender, byte[] e)

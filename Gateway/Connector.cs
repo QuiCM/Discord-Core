@@ -1,12 +1,10 @@
 ﻿using Discord.Descriptors;
 using Discord.Descriptors.Commands;
-using Discord.Descriptors.Guilds;
 using Discord.Descriptors.Payloads;
 using Discord.Http.Gateway;
 using Discord.Json.Objects;
 using Discord.StatusCodes;
 using System;
-using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
 using WebSocketting;
@@ -31,6 +29,7 @@ namespace Discord.Gateway
 
         private bool _heartbeatAck = false;
         private int? _sequence = null;
+        private string _session = null;
 
         /// <summary>
         /// Gateway instance hosting this connector
@@ -143,6 +142,9 @@ namespace Discord.Gateway
                 Socket.OnTextMessage += Socket_OnTextMessage;
             }
 
+            _sequence = seq;
+            _session = ses;
+
             Events.RegisterInternalHandles(this);
 
             //GatewayEvents.OnGatewayHello += GatewayEvents_OnGatewayHello;
@@ -153,6 +155,19 @@ namespace Discord.Gateway
 
             //Return the blockable task so that clients can block
             return blockable;
+        }
+
+        /// <summary>
+        /// Reconnects to a disconnected gateway using the provided gateway session.
+        /// Returns a Task that may be awaited to block
+        /// </summary>
+        /// <param name="seq"></param>
+        /// <param name="session"></param>
+        /// <param name="externalToken"></param>
+        /// <returns></returns>
+        public virtual async Task<Task> ReconnectAsync(int? seq, string session, CancellationToken externalToken)
+        {
+            return await InternalConnectAsync(seq, session);
         }
 
         /// <summary>
@@ -225,7 +240,7 @@ namespace Discord.Gateway
         /// Queues an event for sending over the Websocket
         /// </summary>
         /// <param name="message"></param>
-        public virtual void Queue<TPayload>(GatewayEvent<TPayload> gatewayEvent, 
+        public virtual void Queue<TPayload>(GatewayEvent<TPayload> gatewayEvent,
             Newtonsoft.Json.JsonSerializerSettings settings = null)
         {
             string json = gatewayEvent.Serialize(settings);
@@ -235,27 +250,50 @@ namespace Discord.Gateway
         internal void GatewayEvents_OnGatewayHello(string rawJson, GatewayEvent<HelloPayload> ev)
         {
             HeartbeatInterval = ev.Payload.HeartbeatInterval;
-            //Fire and forget - we don't need to await this
-#pragma warning disable CS4014
-            Queue(new GatewayEvent<IdentifyPayload>(GatewayOpCode.Identify)
-                .WithPayload(new IdentifyPayload
-                {
-                    Token = Credentials.AuthToken,
-                    Compress = false,
-                    LargeThreshold = 250,
-                    Properties = new ConnectionProperties { browser = "DotNET Core2.1", device = "DAsyc", os = "Win10" },
-                    //Presence = new Descriptors.Guilds.Members.StatusDescriptor { status = "dnd" },
-                    //Shards = new[] { 0, 1 }
-                })
-           );
 
+            if (_session != null && _sequence != null)
+            {
+                Queue(new GatewayEvent<ResumePayload>(GatewayOpCode.Resume)
+                    .WithPayload(new ResumePayload
+                    {
+                        Sequence = _sequence.Value,
+                        Session = _session,
+                        Token = Credentials.AuthToken
+                    })
+                );
+            }
+            else
+            {
+                Queue(new GatewayEvent<IdentifyPayload>(GatewayOpCode.Identify)
+                    .WithPayload(new IdentifyPayload
+                    {
+                        Token = Credentials.AuthToken,
+                        Compress = false,
+                        LargeThreshold = 250,
+                        Properties = new ConnectionProperties { browser = "DotNET Core2.1", device = "DAsyc", os = "Win10" }
+                })
+               );
+            }
+
+#pragma warning disable CS4014
+            //There's no need to await this. Warning disabled for sanity's sake
             HeartbeatAsync(linkedTokenSource.Token);
 #pragma warning restore CS4014
         }
 
         internal void GatewayEvents_AllEventsCallback(string rawJson, GatewayEvent<object> ev)
         {
-            Console.WriteLine($"[RECV] [{ev.OpCode}] {(ev.OpCode == GatewayOpCode.Dispatch ? ((DispatchGatewayEvent<object>)ev).Name : "")}");
+            Console.WriteLine($"[RECV] [{ev.OpCode}] {(ev.OpCode == GatewayOpCode.Dispatch ? ((DispatchGatewayEvent<object>)ev).Type.ToString() : "")}");
+
+            if (ev is DispatchGatewayEvent<object> e && e.Sequence.HasValue)
+            {
+                _sequence = e.Sequence;
+            }
+        }
+
+        internal void GatewayEvents_OnReady(string json, DispatchGatewayEvent<GatewayReady> ready)
+        {
+            _session = ready.Payload.Session;
         }
 
         internal void GatewayEvents_OnHeartbeatReq(string json, GatewayEvent<object> ev)

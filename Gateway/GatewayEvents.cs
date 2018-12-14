@@ -15,6 +15,9 @@ namespace Discord.Gateway
         private ConcurrentDictionary<GatewayOpCode, Dictionary<Type, Delegator>> _callbacks =
             new ConcurrentDictionary<GatewayOpCode, Dictionary<Type, Delegator>>();
 
+        private ConcurrentDictionary<EventType, Dictionary<Type, Delegator>> _eventCallbacks =
+            new ConcurrentDictionary<EventType, Dictionary<Type, Delegator>>();
+
         /// <summary>
         /// Registers internal handlers required by the connector
         /// </summary>
@@ -31,10 +34,12 @@ namespace Discord.Gateway
             AddCallback<HelloPayload>(GatewayOpCode.Hello, connector.GatewayEvents_OnGatewayHello);
             AddCallback<object>(GatewayOpCode.Heartbeat, connector.GatewayEvents_OnHeartbeatReq);
             AddCallback<object>(GatewayOpCode.HeartbeatAck, connector.GatewayEvents_OnHeartbeatAck);
+
+            AddEventCallback<GatewayReady>(EventType.READY, connector.GatewayEvents_OnReady);
         }
 
         /// <summary>
-        /// Adds a callback for the given event
+        /// Adds a callback for the given opcode
         /// </summary>
         /// <typeparam name="TPayload"></typeparam>
         /// <param name="opCode"></param>
@@ -64,7 +69,7 @@ namespace Discord.Gateway
         }
 
         /// <summary>
-        /// Removes the given callback
+        /// Removes the given callback for an opcode
         /// </summary>
         /// <typeparam name="TPayload"></typeparam>
         /// <param name="opCode"></param>
@@ -78,14 +83,70 @@ namespace Discord.Gateway
         }
 
         /// <summary>
+        /// Adds a callback for a given event
+        /// </summary>
+        /// <typeparam name="TPayload"></typeparam>
+        /// <param name="type"></param>
+        /// <param name="callback"></param>
+        public void AddEventCallback<TPayload>(EventType type, Action<string, DispatchGatewayEvent<TPayload>> callback)
+        {
+            Type t = typeof(TPayload);
+            _eventCallbacks.AddOrUpdate(type,
+                //add factory: return a new dictionary with the required information
+                new Dictionary<Type, Delegator>() { { t, new Delegator(t, callback) } },
+                //update factory:
+                (o, u) =>
+                {
+                    //if we've already added a delegator for the given type, simply add another invocation to it
+                    if (u.ContainsKey(t))
+                    {
+                        u[t] += callback;
+                    }
+                    //otherwise, add a new delegator
+                    else
+                    {
+                        u.Add(t, new Delegator(t, callback));
+                    }
+                    return u;
+                }
+            );
+        }
+
+        /// <summary>
+        /// Removes the given callback for an event
+        /// </summary>
+        /// <typeparam name="TPayload"></typeparam>
+        /// <param name="type"></param>
+        /// <param name="callback"></param>
+        public void RemoveEventCallback<TPayload>(EventType type, Action<string, GatewayEvent<TPayload>> callback)
+        {
+            if (_eventCallbacks.TryGetValue(type, out Dictionary<Type, Delegator> delegator))
+            {
+                delegator[typeof(TPayload)] -= callback;
+            }
+        }
+
+        /// <summary>
         /// Invokes events for the given json string
         /// </summary>
         /// <param name="json"></param>
         public void Invoke(string json)
         {
             //We need temp event to get the OpCode for this event
-            GatewayEvent<JToken> tempEvent = JsonConvert.DeserializeObject<DispatchGatewayEvent<JToken>>(json);
-            if (_callbacks.TryGetValue(tempEvent.OpCode, out Dictionary<Type, Delegator> callbacks))
+            DispatchGatewayEvent<JToken> tempEvent = JsonConvert.DeserializeObject<DispatchGatewayEvent<JToken>>(json);
+
+            if (_callbacks.TryGetValue(GatewayOpCode.All, out Dictionary<Type, Delegator> callbacks))
+            {
+                foreach (var callback in callbacks)
+                {
+                    object ev = Activator.CreateInstance(callback.Value._eventType);
+                    JsonConvert.PopulateObject(json, ev);
+
+                    callback.Value.Invoke(json, ev);
+                }
+            }
+
+            if (_callbacks.TryGetValue(tempEvent.OpCode, out callbacks))
             {
                 foreach (KeyValuePair<Type, Delegator> callback in callbacks)
                 {
@@ -98,11 +159,13 @@ namespace Discord.Gateway
                 }
             }
 
-            if (_callbacks.TryGetValue(GatewayOpCode.All, out callbacks))
+            if (_eventCallbacks.TryGetValue(tempEvent.Type, out callbacks))
             {
-                foreach (var callback in callbacks)
+                foreach (KeyValuePair<Type, Delegator> callback in callbacks)
                 {
                     object ev = Activator.CreateInstance(callback.Value._eventType);
+                    //Doing this means we deserialize twice per event.
+                    //There doesn't really seem to be any other way to do it however
                     JsonConvert.PopulateObject(json, ev);
 
                     callback.Value.Invoke(json, ev);
