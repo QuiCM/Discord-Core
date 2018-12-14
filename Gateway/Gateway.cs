@@ -125,6 +125,11 @@ namespace Discord.Gateway
             return blockable;
         }
 
+        public async Task<Task> ReconnectAsync()
+        {
+            return await Connector.ReconnectAsync();
+        }
+
         public async Task DisconnectAsync()
         {
             await Connector.DisconnectAsync();

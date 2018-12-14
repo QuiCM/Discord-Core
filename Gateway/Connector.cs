@@ -129,7 +129,7 @@ namespace Discord.Gateway
             return await InternalConnectAsync();
         }
 
-        protected virtual async Task<Task> InternalConnectAsync(int? seq = null, string ses = null)
+        protected virtual async Task<Task> InternalConnectAsync()
         {
             //Use the retrieved information to create a new WebSocket instance, then connect to it
             Socket = new WebSocket(_connectionInfo.url, GatewayRoutes.Encoding, Gateway.Proxy);
@@ -141,9 +141,6 @@ namespace Discord.Gateway
             {
                 Socket.OnTextMessage += Socket_OnTextMessage;
             }
-
-            _sequence = seq;
-            _session = ses;
 
             Events.RegisterInternalHandles(this);
 
@@ -165,9 +162,9 @@ namespace Discord.Gateway
         /// <param name="session"></param>
         /// <param name="externalToken"></param>
         /// <returns></returns>
-        public virtual async Task<Task> ReconnectAsync(int? seq, string session, CancellationToken externalToken)
+        public virtual async Task<Task> ReconnectAsync()
         {
-            return await InternalConnectAsync(seq, session);
+            return await InternalConnectAsync();
         }
 
         /// <summary>
