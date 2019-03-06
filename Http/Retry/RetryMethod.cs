@@ -25,7 +25,7 @@ namespace Discord.Http.Retry
         /// <returns></returns>
         public abstract Task<HttpResponseMessage> RetryGet(
             HttpClient http,
-            string url,
+            Uri uri,
             System.Threading.CancellationToken token
         );
 
@@ -33,13 +33,13 @@ namespace Discord.Http.Retry
         /// Attempts to retry a POST, PUT, or PATCH request
         /// </summary>
         /// <param name="http"></param>
-        /// <param name="url"></param>
+        /// <param name="uri"></param>
         /// <param name="content"></param>
         /// <param name="token"></param>
         /// <returns></returns>
         public abstract Task<HttpResponseMessage> RetryPost(
             HttpClient http, 
-            string url, 
+            Uri uri, 
             HttpContent content, 
             System.Threading.CancellationToken token
         );

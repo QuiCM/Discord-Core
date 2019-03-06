@@ -16,40 +16,40 @@ namespace Discord
         public class ProxyCredentials
         {
             /// <summary>
-            /// <see cref="NetworkCredential.UserName"/>
+            /// See <see cref="NetworkCredential.UserName"/>
             /// </summary>
             public string Username { get; set; }
             /// <summary>
-            /// <see cref="NetworkCredential.Password"/>
+            /// See <see cref="NetworkCredential.Password"/>
             /// </summary>
             public string Password { get; set; }
             /// <summary>
-            /// <see cref="NetworkCredential.Domain"/>
+            /// See <see cref="NetworkCredential.Domain"/>
             /// </summary>
             public string Domain { get; set; }
             /// <summary>
-            /// <see cref="WebProxy.UseDefaultCredentials"/>
+            /// See <see cref="WebProxy.UseDefaultCredentials"/>
             /// </summary>
             public bool UseDefault { get; set; }
         }
         /// <summary>
-        /// Whether to use a proxy or not
+        /// Whether to use the proxy or not
         /// </summary>
         public bool UseProxy { get; set; }
         /// <summary>
-        /// <see cref="WebProxy.Address"/>
+        /// See <see cref="WebProxy.Address"/>
         /// </summary>
         public string Address { get; set; }
         /// <summary>
-        /// <see cref="WebProxy.BypassList"/>
+        /// See <see cref="WebProxy.BypassList"/>
         /// </summary>
         public string[] BypassAddresses { get; set; }
         /// <summary>
-        /// <see cref="WebProxy.BypassProxyOnLocal"/>
+        /// See <see cref="WebProxy.BypassProxyOnLocal"/>
         /// </summary>
         public bool BypassLocalAddresses { get; set; }
         /// <summary>
-        /// <see cref="WebProxy.Credentials"/>
+        /// See <see cref="WebProxy.Credentials"/>
         /// </summary>
         public ProxyCredentials Credentials { get; set; }
     }
@@ -62,10 +62,33 @@ namespace Discord
         [JsonIgnore]
         private string _path;
 
+        /// <summary>
+        /// Proxy configuration used to configure the websocket and REST proxies
+        /// </summary>
         public ProxyConfiguration ProxyConfiguration { get; set; } = new ProxyConfiguration();
+        /// <summary>
+        /// Authentication token used to authenticate against Discord services
+        /// </summary>
         public string AuthToken { get; set; }
+        /// <summary>
+        /// Last known session ID, used for reconnecting
+        /// </summary>
+        public string LastSession { get; set; }
+        /// <summary>
+        /// Last know sequence received, used for reconnecting
+        /// </summary>
+        public int? LastSequence { get; set; }
+        /// <summary>
+        /// User agent passed to the Gateway API
+        /// </summary>
         public string UserAgentUrl { get; set; } = "www";
+        /// <summary>
+        /// Application version passed to the Gateway API
+        /// </summary>
         public string Version { get; set; } = "0.1a";
+        /// <summary>
+        /// Encoding method to use for Websocket communications
+        /// </summary>
         public WebSocketMessageEncoding Encoding { get; set; } = WebSocketMessageEncoding.Json;
 
 
@@ -86,7 +109,7 @@ namespace Discord
         /// <summary>
         /// Writes the configuration to disk
         /// </summary>
-        public Configuration Write()
+        public Configuration Save()
         {
             File.WriteAllText(_path, JsonConvert.SerializeObject(this, Formatting.Indented));
             return this;
@@ -97,11 +120,11 @@ namespace Discord
         /// </summary>
         /// <param name="path"></param>
         /// <returns></returns>
-        public static Configuration Read(string path)
+        public static Configuration Load(string path)
         {
             return File.Exists(path)
                 ? JsonConvert.DeserializeObject<Configuration>(File.ReadAllText(path)).SetPath(path)
-                : new Configuration(path).Write();
+                : new Configuration(path).Save();
         }
     }
 }

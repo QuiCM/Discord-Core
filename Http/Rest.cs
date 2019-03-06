@@ -1,6 +1,9 @@
 ﻿using Discord.Http.Retry;
 using Newtonsoft.Json;
+using System;
 using System.Collections.Generic;
+using System.Collections.Specialized;
+using System.Diagnostics;
 using System.Linq;
 using System.Net.Http;
 using System.Text.RegularExpressions;
@@ -27,6 +30,8 @@ namespace Discord.Http
         /// RetryMethod used when a HTTP request does not complete with a success code
         /// </summary>
         public RetryMethod RetryMethod { get; set; } = new DelayedRetry();
+        public Channels.ChannelRoutes Channels { get; private set; }
+        public Uri BaseAddress { get; } = new Uri("https://discordapp.com/api/");
 
         private Regex _urlRegex = new Regex(".+\\?\\w+=.+(?>&\\w+=.+)*?");
         private Credentials.Credentials _credentials;
@@ -58,6 +63,8 @@ namespace Discord.Http
             Http = new HttpClient(HttpHandler);
             Http.DefaultRequestHeaders.Add("User-Agent", $"DiscordBot ({_userAgent}, {_userAgentVersion})");
             Http.DefaultRequestHeaders.Add("Authorization", _credentials.AuthToken);
+
+            Channels = new Channels.ChannelRoutes(this);
         }
 
         /// <summary>
@@ -76,22 +83,24 @@ namespace Discord.Http
         {
             if (queryParams != null)
             {
-                string queryString = string.Join("&", queryParams.Select(param => $"{param.Key}={param.Value}"));
+                string queryString = string.Join("&", queryParams.Select(param => $"{Uri.EscapeDataString(param.Key)}={Uri.EscapeDataString(param.Value)}"));
                 url = _urlRegex.IsMatch(url) ? $"{url}&{queryString}" : $"{url}?{queryString}";
             }
+
+            Uri uri = new Uri(url);
             
-            HttpResponseMessage response = await Http.GetAsync(url, ct);
+            HttpResponseMessage response = await Http.GetAsync(uri, ct);
 
             if (!response.IsSuccessStatusCode)
             {
-                response = await RetryMethod.RetryGet(Http, url, ct);
+                response = await RetryMethod.RetryGet(Http, uri, ct);
             }
 
             //if the response is still failed after retrying, throw an exception
             response.EnsureSuccessStatusCode();
             
             string json = await response.Content.ReadAsStringAsync();
-            System.Diagnostics.Debug.WriteLine($"HTTP GET '{url}' returned:\n{json}");
+            Trace.WriteLine($"HTTP GET '{uri}' returned:\n{json}");
 
             return JsonConvert.DeserializeObject<T>(json);
         }
@@ -100,28 +109,26 @@ namespace Discord.Http
         /// Performs an HTTP POST request on an internet resource
         /// </summary>
         /// <typeparam name="T"></typeparam>
-        /// <param name="url"></param>
+        /// <param name="uri"></param>
         /// <param name="content"></param>
         /// <param name="ct"></param>
         /// <returns></returns>
-        public async Task<T> PostAsync<T>(
-            string url,
+        public async Task<HttpResponseMessage> PostAsync(
+            string uri,
             HttpContent content,
             CancellationToken ct)
         {
-            HttpResponseMessage response = await Http.PostAsync(url, content, ct);
+            Uri requestAddress = new Uri(BaseAddress, uri);
+            HttpResponseMessage response = await Http.PostAsync(requestAddress, content, ct);
 
             if (!response.IsSuccessStatusCode)
             {
-                response = await RetryMethod.RetryPost(Http, url, content, ct);
+                response = await RetryMethod.RetryPost(Http, requestAddress, content, ct);
             }
 
             //if the response is still failed after retrying, throw an exception
             response.EnsureSuccessStatusCode();
-
-            string json = await response.Content.ReadAsStringAsync();
-            System.Diagnostics.Debug.WriteLine($"HTTP POST '{url}'; content '{content}' returned:\n{json}");
-            return JsonConvert.DeserializeObject<T>(json);
+            return response;
         }
     }
 }

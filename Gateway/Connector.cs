@@ -5,6 +5,7 @@ using Discord.Http.Gateway;
 using Discord.Json.Objects;
 using Discord.StatusCodes;
 using System;
+using System.Diagnostics;
 using System.Threading;
 using System.Threading.Tasks;
 using WebSocketting;
@@ -28,8 +29,8 @@ namespace Discord.Gateway
         private GetGatewayResponseObject _connectionInfo;
 
         private bool _heartbeatAck = false;
-        private int? _sequence = null;
-        private string _session = null;
+        internal int? _sequence = null;
+        internal string _session = null;
 
         /// <summary>
         /// Gateway instance hosting this connector
@@ -39,6 +40,10 @@ namespace Discord.Gateway
         /// Credentials used to authenticate with the Gateway
         /// </summary>
         protected Credentials.Credentials Credentials { get; }
+        /// <summary>
+        /// Configuration used to configure the Gateway
+        /// </summary>
+        protected Configuration Configuration { get; }
         /// <summary>
         /// Interval at which heartbeat commands are sent over the Gateway
         /// </summary>
@@ -52,6 +57,7 @@ namespace Discord.Gateway
         /// WebSocket used to connect to the Gateway
         /// </summary>
         internal WebSocket Socket { get; set; }
+
         /// <summary>
         /// TokenSource created by linking the Gateway's CancellationToken and an end-user provided token
         /// </summary>
@@ -73,10 +79,11 @@ namespace Discord.Gateway
         /// </summary>
         /// <param name="gateway">Gateway instance hosting this connector</param>
         /// <param name="credentials">Credentials with which to connect to the Discord Gateway API</param>
-        public Connector(Gateway gateway, Credentials.Credentials credentials)
+        public Connector(Gateway gateway, Credentials.Credentials credentials, Configuration config)
         {
             Gateway = gateway;
             Credentials = credentials;
+            Configuration = config;
         }
 
         /// <summary>
@@ -101,7 +108,6 @@ namespace Discord.Gateway
 
             //Retrieve information required to connect to the Gateway.
             //This will throw an exception if it fails.
-            //Should we handle the exception and cancel, or let it bubble?
             _connectionInfo = await AuthenticateAsync(linkedTokenSource.Token);
 
             return await InternalConnectAsync();
@@ -142,7 +148,7 @@ namespace Discord.Gateway
                 Socket.OnTextMessage += Socket_OnTextMessage;
             }
 
-            Events.RegisterInternalHandles(this);
+            Events.RegisterInternalHandlers(this);
 
             //GatewayEvents.OnGatewayHello += GatewayEvents_OnGatewayHello;
             //We send the linked TokenSource token through so that cancellation will propagate to/from the WebSocket.
@@ -155,22 +161,12 @@ namespace Discord.Gateway
         }
 
         /// <summary>
-        /// Reconnects to a disconnected gateway using the provided gateway session.
-        /// Returns a Task that may be awaited to block
-        /// </summary>
-        /// <param name="seq"></param>
-        /// <param name="session"></param>
-        /// <param name="externalToken"></param>
-        /// <returns></returns>
-        public virtual async Task<Task> ReconnectAsync()
-        {
-            return await InternalConnectAsync();
-        }
-
-        /// <summary>
         /// Disconnects the gateway
         /// </summary>
-        public virtual async Task<DisconnectStatus> DisconnectAsync()
+        public virtual async Task<DisconnectStatus> DisconnectAsync(
+            System.Net.WebSockets.WebSocketCloseStatus closeStatus = System.Net.WebSockets.WebSocketCloseStatus.NormalClosure,
+            string reason = ""
+        )
         {
             if (_externalToken == null)
             {
@@ -180,13 +176,13 @@ namespace Discord.Gateway
 
             if (linkedTokenSource.IsCancellationRequested)
             {
-                //The user-provided token or our internal token have already been cancelled
-                return DisconnectStatus.AlreadyPending;
+                linkedTokenSource.Token.ThrowIfCancellationRequested();
             }
 
+            await Socket.DisconnectAsync(closeStatus, reason, linkedTokenSource.Token);
             //Cancelling our token should cause everything to stop
-            await Socket.DisconnectAsync(System.Net.WebSockets.WebSocketCloseStatus.NormalClosure, "", linkedTokenSource.Token);
             linkedTokenSource.Cancel();
+            linkedTokenSource.Dispose();
 
             return DisconnectStatus.Pending;
         }
@@ -219,11 +215,9 @@ namespace Discord.Gateway
             token.ThrowIfCancellationRequested();
             await Task.Delay(HeartbeatInterval, token);
 
-            if (!_heartbeatAck)
+            if (!_heartbeatAck) //If the heartbeat is not acknowledged between consecutive heartbeats, immediately disconnect
             {
-                await Socket.DisconnectAsync(System.Net.WebSockets.WebSocketCloseStatus.ProtocolError, "No ACK received", token);
-                linkedTokenSource.Cancel();
-                //need to restart once everything dies - or leave this to end user?
+                await DisconnectAsync(System.Net.WebSockets.WebSocketCloseStatus.ProtocolError, "No ACK received");
                 return;
             }
 
@@ -237,40 +231,53 @@ namespace Discord.Gateway
         /// Queues an event for sending over the Websocket
         /// </summary>
         /// <param name="message"></param>
-        public virtual void Queue<TPayload>(GatewayEvent<TPayload> gatewayEvent,
-            Newtonsoft.Json.JsonSerializerSettings settings = null)
+        public virtual void Queue<TPayload>(
+            GatewayEvent<TPayload> gatewayEvent,
+            Newtonsoft.Json.JsonSerializerSettings settings = null
+        )
         {
-            string json = gatewayEvent.Serialize(settings);
             Socket.Send(gatewayEvent.Serialize(settings));
         }
 
-        internal void GatewayEvents_OnGatewayHello(string rawJson, GatewayEvent<HelloPayload> ev)
+        internal void Identify()
         {
-            HeartbeatInterval = ev.Payload.HeartbeatInterval;
-
-            if (_session != null && _sequence != null)
+            if (_session != null && _sequence != null) //if these fields have values we can attempt to resume
             {
                 Queue(new GatewayEvent<ResumePayload>(GatewayOpCode.Resume)
-                    .WithPayload(new ResumePayload
+                    .WithPayload(
+                    new ResumePayload
                     {
-                        Sequence = _sequence.Value,
-                        Session = _session,
-                        Token = Credentials.AuthToken
+                        seq = _sequence.Value,
+                        session_id = _session,
+                        token = Credentials.AuthToken
                     })
                 );
             }
-            else
+            else //Otherwise we have to re-identify
             {
                 Queue(new GatewayEvent<IdentifyPayload>(GatewayOpCode.Identify)
-                    .WithPayload(new IdentifyPayload
+                    .WithPayload(
+                    new IdentifyPayload
                     {
                         Token = Credentials.AuthToken,
                         Compress = false,
                         LargeThreshold = 250,
-                        Properties = new ConnectionProperties { browser = "DotNET Core2.1", device = "DAsyc", os = "Win10" }
-                })
+                        Properties = new ConnectionProperties { browser = "DotNET Core", device = "D'Async", os = "Win10" }
+                    })
                );
             }
+        }
+
+        /// <summary>
+        /// Invoked when an <see cref="EventType.HELLO"/> event is received
+        /// </summary>
+        /// <param name="rawJson"></param>
+        /// <param name="ev"></param>
+        internal void GatewayEvents_OnGatewayHello(string rawJson, DispatchGatewayEvent<HelloPayload> ev)
+        {
+            HeartbeatInterval = ev.Payload.HeartbeatInterval;
+
+            Identify();
 
 #pragma warning disable CS4014
             //There's no need to await this. Warning disabled for sanity's sake
@@ -278,42 +285,93 @@ namespace Discord.Gateway
 #pragma warning restore CS4014
         }
 
-        internal void GatewayEvents_AllEventsCallback(string rawJson, GatewayEvent<object> ev)
+        internal async Task GatewayEvents_InvalidSession(string rawJson, GatewayEvent<object> ev)
         {
-            Console.WriteLine($"[RECV] [{ev.OpCode}] {(ev.OpCode == GatewayOpCode.Dispatch ? ((DispatchGatewayEvent<object>)ev).Type.ToString() : "")}");
+            //"Clients are limited to 1 identify every 5 seconds; if they exceed this limit, the gateway will respond with an Opcode 9 Invalid Session."
 
-            if (ev is DispatchGatewayEvent<object> e && e.Sequence.HasValue)
-            {
-                _sequence = e.Sequence;
-            }
+            //"It's also possible that your client cannot reconnect in time to resume, in which case the client will receive a Opcode 9 Invalid Session 
+            //  and is expected to wait a random amount of time—between 1 and 5 seconds—then send a fresh Opcode 2 Identify"
+
+            //Wait 5 seconds before re-connecting
+            await Task.Delay(5000);
+            //Invalidate session then reidentify
+            _session = null;
+            Configuration.LastSession = null;
+            Configuration.LastSequence = null;
+            Identify();
         }
 
+        /// <summary>
+        /// Invoked when any <see cref="EventType"/> is received
+        /// </summary>
+        /// <param name="rawJson"></param>
+        /// <param name="ev"></param>
+        internal void GatewayEvents_AllEventsCallback(string rawJson, DispatchGatewayEvent<object> ev)
+        {
+            Debug.Write($"[RECV] [{ev.OpCode}]");
+            if (ev is DispatchGatewayEvent<object> e && e.Sequence.HasValue) //Only dispatch events have sequence values
+            {
+                _sequence = e.Sequence;
+                Configuration.LastSequence = _sequence;
+                Debug.Write($" [{e.Type.ToString()}] Seq={e.Sequence}");
+            }
+            Debug.Write("\n");
+        }
+
+        /// <summary>
+        /// Invoked when an <see cref="EventType.READY"/> event is received
+        /// </summary>
+        /// <param name="json"></param>
+        /// <param name="ready"></param>
         internal void GatewayEvents_OnReady(string json, DispatchGatewayEvent<GatewayReady> ready)
         {
             _session = ready.Payload.Session;
+            Configuration.LastSession = _session;
         }
 
-        internal void GatewayEvents_OnHeartbeatReq(string json, GatewayEvent<object> ev)
+        /// <summary>
+        /// Invoked when a <see cref="GatewayOpCode.Heartbeat"/> OpCode is received
+        /// </summary>
+        /// <param name="json"></param>
+        /// <param name="ev"></param>
+        internal void GatewayEvents_OnHeartbeatReq(string json, DispatchGatewayEvent<object> ev)
         {
+            //The gateway can request a heartbeat. Send one immediately if this occurs.
+            //Shouldn't interrupt the regular heartbeating
             Queue(new GatewayEvent<object>(GatewayOpCode.HeartbeatAck),
                 new Newtonsoft.Json.JsonSerializerSettings { NullValueHandling = Newtonsoft.Json.NullValueHandling.Ignore });
         }
 
-        internal void GatewayEvents_OnHeartbeatAck(string json, GatewayEvent<object> ev)
+        /// <summary>
+        /// Invoked when a <see cref="GatewayOpCode.HeartbeatAck"/> OpCode is received
+        /// </summary>
+        /// <param name="json"></param>
+        /// <param name="ev"></param>
+        internal void GatewayEvents_OnHeartbeatAck(string json, DispatchGatewayEvent<object> ev)
         {
             _heartbeatAck = true;
         }
 
-        private void Socket_OnTextMessage(object sender, StringMessageEventArgs e)
+        /// <summary>
+        /// Invoked when the connected <see cref="Socket"/> receives a raw text message
+        /// </summary>
+        /// <param name="sender"></param>
+        /// <param name="e"></param>
+        private async void Socket_OnTextMessage(object sender, StringMessageEventArgs e)
         {
             OnRawTextMessage?.Invoke(this, e.Data);
-            Events.Invoke(e.Data);
+            await Events.Invoke(e.Data);
         }
 
+        /// <summary>
+        /// Invoked when the connected <see cref="Socket"/> receives a binary-encoded message
+        /// </summary>
+        /// <param name="sender"></param>
+        /// <param name="e"></param>
         private void Socket_OnBinaryMessage(object sender, BinaryMessageEventArgs e)
         {
             OnRawBinaryMessage?.Invoke(this, e.Data);
-            //Invoke
+            //Deserialize and Invoke
         }
     }
 }

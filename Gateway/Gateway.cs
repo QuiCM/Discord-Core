@@ -16,9 +16,13 @@ namespace Discord.Gateway
         /// </summary>
         protected Credentials.Credentials Credentials { get; set; }
         /// <summary>
+        /// Configuration used to configure this Gateway
+        /// </summary>
+        protected Configuration Configuration { get; set; }
+        /// <summary>
         /// CancellationTokenSource used forward cancellation to components
         /// </summary>
-        public CancellationTokenSource GatewayTokenSource { get; private set; }
+        public CancellationTokenSource GatewayTokenSource { get; internal set; }
         /// <summary>
         /// Connector used to connect to the Discord Gateway API
         /// </summary>
@@ -28,7 +32,7 @@ namespace Discord.Gateway
         /// </summary>
         public Rest Rest { get; set; }
         /// <summary>
-        /// Proxy used for connections
+        /// Proxy used for connections to the gateway
         /// </summary>
         public System.Net.IWebProxy Proxy => _proxy;
         /// <summary>
@@ -43,11 +47,12 @@ namespace Discord.Gateway
         public Gateway(Credentials.Credentials credentials, Configuration config)
         {
             Credentials = credentials;
+            Configuration = config;
             GatewayTokenSource = new CancellationTokenSource();
 
             Http.Gateway.GatewayRoutes.Encoding = config.Encoding;
             Rest = new Rest(Credentials, config.UserAgentUrl, config.Version);
-            Connector = new Connector(this, Credentials);
+            Connector = new Connector(this, Credentials, Configuration);
 
             InitializeProxy(config);
 
@@ -59,6 +64,12 @@ namespace Discord.Gateway
             {
                 Connector.OnRawBinaryMessage += Connector_OnBinaryMessage;
             }
+        }
+
+        public void LoadPreviousSession()
+        {
+            Connector._session = Configuration.LastSession;
+            Connector._sequence = Configuration.LastSequence;
         }
 
         /// <summary>
@@ -79,7 +90,7 @@ namespace Discord.Gateway
         /// <returns>a <see cref="Task"/> that may be awaited to block the calling thread</returns>
         public virtual async Task<Task> ConnectAsync(CancellationToken token)
         {
-            //if the user has provided a cancelled token, abuse them
+            //if the user has provided a cancelled token, throw an exception
             token.ThrowIfCancellationRequested();
 
             //To allow reconnecting to the same gateway instance, we recreate our internal token source if it has previously been cancelled
@@ -110,7 +121,7 @@ namespace Discord.Gateway
                 Json.Objects.GetGatewayBotResponseObject botConnectionInfo = connectionInfo as Json.Objects.GetGatewayBotResponseObject;
                 if (botConnectionInfo.session_start_limit.remaining < 1)
                 {
-                    throw new Utility.SessionLimitException("Session limit", botConnectionInfo.session_start_limit.reset_after);
+                    throw new Utility.SessionLimitException(botConnectionInfo.session_start_limit.reset_after);
                 }
             }
 
@@ -125,14 +136,23 @@ namespace Discord.Gateway
             return blockable;
         }
 
-        public async Task<Task> ReconnectAsync()
+        /// <summary>
+        /// Asynchronously attempts to reconnect to the gateway
+        /// </summary>
+        /// <returns></returns>
+        public async Task<Task> ReconnectAsync(CancellationTokenSource tokenSource)
         {
-            return await Connector.ReconnectAsync();
+            return await Connector.ConnectAsync(tokenSource.Token);
         }
 
-        public async Task DisconnectAsync()
+        /// <summary>
+        /// Asynchronously attempts to disconnect from the gateway
+        /// </summary>
+        /// <returns></returns>
+        public async Task<StatusCodes.DisconnectStatus> DisconnectAsync(
+            System.Net.WebSockets.WebSocketCloseStatus closeStatus = System.Net.WebSockets.WebSocketCloseStatus.NormalClosure)
         {
-            await Connector.DisconnectAsync();
+            return await Connector.DisconnectAsync(closeStatus);
         }
 
         private void Connector_OnBinaryMessage(object sender, byte[] e)
@@ -143,6 +163,10 @@ namespace Discord.Gateway
         {
         }
 
+        /// <summary>
+        /// Creates and sets the gateway & REST proxy based on settings defined in the configuration file
+        /// </summary>
+        /// <param name="config"></param>
         private void InitializeProxy(Configuration config)
         {
             if (config.ProxyConfiguration.UseProxy)

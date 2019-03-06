@@ -12,11 +12,11 @@ namespace Discord.Utility
         /// <summary>
         /// Number of milliseconds until session limit resets
         /// </summary>
-        public long ResetAfter { get; }
+        public long ResetsAfterMs { get; }
 
-        public SessionLimitException(string message, long resetAfter) : base(message)
+        public SessionLimitException(long resetAfter, string message = "Session limit reached") : base(message)
         {
-            ResetAfter = resetAfter;
+            ResetsAfterMs = resetAfter;
         }
     }
 }

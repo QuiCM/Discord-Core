@@ -39,14 +39,14 @@ namespace Discord.Http.Retry
         /// <param name="url"></param>
         /// <param name="token"></param>
         /// <returns></returns>
-        public override async Task<HttpResponseMessage> RetryGet(HttpClient http, string url, CancellationToken token)
+        public override async Task<HttpResponseMessage> RetryGet(HttpClient http, Uri uri, CancellationToken token)
         {
             HttpResponseMessage response;
             int retries = 1;
             do
             {
                 await Task.Delay(DelayFactor(retries), token);
-                response = await http.GetAsync(url, token);
+                response = await http.GetAsync(uri, token);
                 token.ThrowIfCancellationRequested();
 
                 if (response.IsSuccessStatusCode)
@@ -69,14 +69,14 @@ namespace Discord.Http.Retry
         /// <param name="content"></param>
         /// <param name="token"></param>
         /// <returns></returns>
-        public override async Task<HttpResponseMessage> RetryPost(HttpClient http, string url, HttpContent content, CancellationToken token)
+        public override async Task<HttpResponseMessage> RetryPost(HttpClient http, Uri uri, HttpContent content, CancellationToken token)
         {
             HttpResponseMessage response;
             int retries = 1;
             do
             {
                 await Task.Delay(DelayFactor(retries), token);
-                response = await http.PostAsync(url, content, token);
+                response = await http.PostAsync(uri, content, token);
                 token.ThrowIfCancellationRequested();
 
                 if (response.IsSuccessStatusCode)
